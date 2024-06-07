@@ -1,5 +1,11 @@
 package hbbft
 
+import (
+	"crypto/sha256"
+
+	"github.com/axiomesh/axiom-kit/types"
+)
+
 type Config struct {
 	// 节点数
 	N int
@@ -28,4 +34,9 @@ type BroadcastMessage struct {
 type AgreementMessage struct {
 	Epoch   uint64
 	Message interface{}
+}
+
+func CalculateHash(data []byte) string {
+	h := sha256.Sum256(data)
+	return types.NewHash(h[:]).String()
 }

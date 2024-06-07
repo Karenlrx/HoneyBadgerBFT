@@ -5,38 +5,42 @@ import (
 	"sync"
 	"time"
 
-	"../hbbft"
+	"github.com/axiomesh/axiom-kit/types"
+	"github.com/liu-jianhao/HoneyBadgerBFT/hbbft"
 )
 
 type Server struct {
 	id             uint64
 	hb             *hbbft.HoneyBadger
 	lock           sync.RWMutex
-	transactionMap map[string]*Transaction
+	transactionMap map[string]*types.Transaction
 	totalCommit    int
 	start          time.Time
 }
 
 func newServer(id uint64, nodes []uint64) *Server {
-	hb := hbbft.NewHoneyBadger(hbbft.Config{
+	hb, err := hbbft.NewHoneyBadger(hbbft.Config{
 		N:         len(nodes),
 		F:         len(nodes) / 4,
 		ID:        id,
 		Nodes:     nodes,
 		BatchSize: batchSize,
 	})
+	if err != nil {
+		panic(err)
+	}
 	return &Server{
 		id:             id,
 		hb:             hb,
-		transactionMap: make(map[string]*Transaction),
+		transactionMap: make(map[string]*types.Transaction),
 		start:          time.Now(),
 	}
 }
 
-func (s *Server) addTransactions(txx ...*Transaction) {
+func (s *Server) addTransactions(txx ...*types.Transaction) {
 	for _, tx := range txx {
 		s.lock.Lock()
-		s.transactionMap[string(tx.Hash())] = tx
+		s.transactionMap[tx.RbftGetTxHash()] = tx
 		s.lock.Unlock()
 
 		s.hb.AddTransaction(tx)
@@ -52,7 +56,7 @@ func (s *Server) addTransactionLoop() {
 }
 
 func (s *Server) commitLoop() {
-	timer := time.NewTicker(time.Second * 5)
+	timer := time.NewTicker(time.Second * 10)
 	n := 0
 	for {
 		select {
@@ -61,10 +65,11 @@ func (s *Server) commitLoop() {
 			epochList := make([]uint64, 0)
 			for e, txx := range out {
 				for _, tx := range txx {
-					hash := tx.Hash()
+					//fmt.Printf("node%d reveive commit in epoch %d, tx[account: %s, nonce:%d]\n", s.id, e, tx.RbftGetFrom(), tx.RbftGetNonce())
+					hash := tx.RbftGetTxHash()
 					s.lock.Lock()
 					n++
-					delete(s.transactionMap, string(hash))
+					delete(s.transactionMap, hash)
 					s.lock.Unlock()
 				}
 				epochList = append(epochList, e)

@@ -2,6 +2,8 @@ package hbbft
 
 import (
 	"fmt"
+
+	"github.com/sirupsen/logrus"
 )
 
 type ACS struct {
@@ -25,6 +27,7 @@ type ACS struct {
 	closeCh   chan struct{}
 	inputCh   chan acsInput
 	messageCh chan acsMessageSet
+	logger    logrus.FieldLogger
 }
 
 func NewACS(cfg Config) *ACS {
@@ -41,6 +44,7 @@ func NewACS(cfg Config) *ACS {
 		closeCh:      make(chan struct{}),
 		inputCh:      make(chan acsInput),
 		messageCh:    make(chan acsMessageSet),
+		logger:       Logger(acs),
 	}
 
 	for _, id := range cfg.Nodes {
@@ -147,6 +151,7 @@ func (a *ACS) inputValue(data []byte) error {
 		return fmt.Errorf("getMessages not enough")
 	}
 
+	// 广播msg
 	for i := 0; i < a.N-1; i++ {
 		if a.Nodes[i] != a.ID {
 			a.messageList.addMessage(&ACSMessage{a.ID, msgs[i]}, a.Nodes[i])

@@ -2,37 +2,39 @@ package hbbft
 
 import (
 	"sync"
+
+	"github.com/axiomesh/axiom-kit/types"
 )
 
 type transactionBuffer struct {
 	lock sync.Mutex
-	data []Transaction
+	data []*types.Transaction
 }
 
 func newTransactionBuffer() *transactionBuffer {
 	return &transactionBuffer{
-		data: make([]Transaction, 0, 1024*1024),
+		data: make([]*types.Transaction, 0, 1024*1024),
 	}
 }
 
-func (b *transactionBuffer) add(transaction Transaction) {
+func (b *transactionBuffer) add(transaction *types.Transaction) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 	b.data = append(b.data, transaction)
 }
 
-func (b *transactionBuffer) delete(transactions []Transaction) {
+func (b *transactionBuffer) delete(transactions []*types.Transaction) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	temp := make(map[string]Transaction)
+	temp := make(map[string]*types.Transaction)
 	for i := 0; i < len(b.data); i++ {
-		temp[string(b.data[i].Hash())] = b.data[i]
+		temp[b.data[i].RbftGetTxHash()] = b.data[i]
 	}
 	for i := 0; i < len(transactions); i++ {
-		delete(temp, string(transactions[i].Hash()))
+		delete(temp, transactions[i].RbftGetTxHash())
 	}
-	data := make([]Transaction, len(temp))
+	data := make([]*types.Transaction, len(temp))
 	i := 0
 	for _, tx := range temp {
 		data[i] = tx

@@ -1,12 +1,13 @@
 package hbbft
 
 import (
-	"bytes"
-	"encoding/gob"
 	"math"
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/axiomesh/axiom-kit/types"
+	"github.com/sirupsen/logrus"
 )
 
 type HoneyBadger struct {
@@ -21,20 +22,26 @@ type HoneyBadger struct {
 
 	lock sync.Mutex
 	// epoch -> []Transaction，在epoch中提交的事务
-	outputs map[uint64][]Transaction
+	outputs map[uint64][]*types.Transaction
 
 	// 需要在处理之后广播的消息
 	messageList *messageList
+
+	logger logrus.FieldLogger
 }
 
-func NewHoneyBadger(cfg Config) *HoneyBadger {
+func NewHoneyBadger(cfg Config) (*HoneyBadger, error) {
+	if err := Initialize(); err != nil {
+		return nil, err
+	}
 	return &HoneyBadger{
 		Config:            cfg,
 		acsInstances:      make(map[uint64]*ACS),
 		transactionBuffer: newTransactionBuffer(),
-		outputs:           make(map[uint64][]Transaction),
+		outputs:           make(map[uint64][]*types.Transaction),
 		messageList:       newMessageList(),
-	}
+		logger:            Logger(honeyBadger),
+	}, nil
 }
 
 func (hb *HoneyBadger) GetMessage() []Message {
@@ -42,7 +49,7 @@ func (hb *HoneyBadger) GetMessage() []Message {
 }
 
 // 加到buffer中
-func (hb *HoneyBadger) AddTransaction(tx Transaction) {
+func (hb *HoneyBadger) AddTransaction(tx *types.Transaction) {
 	hb.transactionBuffer.add(tx)
 }
 
@@ -72,18 +79,23 @@ func (hb *HoneyBadger) HandleMessage(sid, epoch uint64, msg *ACSMessage) error {
 			return nil
 		}
 
-		transactionMap := make(map[string]Transaction)
-		for _, output := range outputs {
-			transactions := make([]Transaction, 0)
-			if err := gob.NewDecoder(bytes.NewReader(output)).Decode(&transactions); err != nil {
+		transactionMap := make(map[string]*types.Transaction)
+		for id, output := range outputs {
+			hash := CalculateHash(output)
+			hb.logger.Debugf("node%d receive commit from node %d in epoch %d, outputHash:%s\n", hb.ID, id, hb.epoch, hash)
+			transactions, err := types.UnmarshalTransactions(output)
+			if err != nil {
+				hb.logger.Errorf("unmarshal transactions error", err)
 				return err
 			}
+
 			for _, tx := range transactions {
-				transactionMap[string(tx.Hash())] = tx
+				transactionMap[tx.RbftGetTxHash()] = tx
+				hb.logger.Infof("node%d receive commit from node %d in epoch %d, tx[account: %s, nonce:%d]\n", hb.ID, id, hb.epoch, tx.RbftGetFrom(), tx.RbftGetNonce())
 			}
 		}
 
-		transactions := make([]Transaction, 0)
+		transactions := make([]*types.Transaction, 0)
 		for _, tx := range transactionMap {
 			transactions = append(transactions, tx)
 		}
@@ -119,12 +131,12 @@ func (hb *HoneyBadger) Start() error {
 }
 
 // 返回每次epoch已经提交的交易
-func (hb *HoneyBadger) Outputs() map[uint64][]Transaction {
+func (hb *HoneyBadger) Outputs() map[uint64][]*types.Transaction {
 	hb.lock.Lock()
 	defer hb.lock.Unlock()
 
 	out := hb.outputs
-	hb.outputs = make(map[uint64][]Transaction)
+	hb.outputs = make(map[uint64][]*types.Transaction)
 	return out
 }
 
@@ -138,15 +150,20 @@ func (hb *HoneyBadger) propose() error {
 	n := int(math.Max(float64(1), float64(batchSize/len(hb.Nodes))))
 
 	rand.Seed(time.Now().UnixNano())
-	batch := make([]Transaction, 0)
+	batch := make([]*types.Transaction, 0)
 	for i := 0; i < n; i++ {
-		batch = append(batch, hb.transactionBuffer.data[:batchSize][rand.Intn(batchSize)])
+		sliceNum := rand.Intn(batchSize)
+		// 随机在batchSize中取一笔交易
+		batch = append(batch, hb.transactionBuffer.data[:batchSize][sliceNum])
 	}
+	//batch = append(batch, hb.transactionBuffer.data[:n]...)
 
-	buf := new(bytes.Buffer)
-	if err := gob.NewEncoder(buf).Encode(batch); err != nil {
+	data, err := types.MarshalTransactions(batch)
+	if err != nil {
 		return err
 	}
+	hash := CalculateHash(data)
+	hb.logger.Debugf("node%d propose %d tx in epoch %d, outputHash:%s\n", hb.ID, len(batch), hb.epoch, hash)
 
 	acs, ok := hb.acsInstances[hb.epoch]
 	if !ok {
@@ -154,7 +171,7 @@ func (hb *HoneyBadger) propose() error {
 	}
 	hb.acsInstances[hb.epoch] = acs
 
-	if err := acs.InputValue(buf.Bytes()); err != nil {
+	if err := acs.InputValue(data); err != nil {
 		return err
 	}
 	hb.addMessages(acs.messageList.getMessages())

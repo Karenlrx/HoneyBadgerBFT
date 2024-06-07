@@ -3,6 +3,8 @@ package hbbft
 import (
 	"fmt"
 	"sync"
+
+	"github.com/sirupsen/logrus"
 )
 
 type BBA struct {
@@ -33,6 +35,7 @@ type BBA struct {
 	closeCh   chan struct{}
 	inputCh   chan bbaInput
 	messageCh chan bbaMessage
+	logger    logrus.FieldLogger
 }
 
 func NewBBA(cfg Config) *BBA {
@@ -47,6 +50,7 @@ func NewBBA(cfg Config) *BBA {
 		messageCh:       make(chan bbaMessage),
 		messages:        make([]*AgreementMessage, 0),
 		delayedMessages: make([]delayedMessage, 0),
+		logger:          Logger(bba),
 	}
 
 	go bba.run()

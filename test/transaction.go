@@ -1,31 +1,27 @@
 package main
 
 import (
-	"encoding/binary"
-	"encoding/gob"
-	"math/rand"
+	"math/big"
 	"time"
+
+	"github.com/axiomesh/axiom-kit/types"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-	gob.Register(&Transaction{})
-}
+const to = "0xc7F999b83Af6DF9e67d0a37Ee7e900bF38b3D013"
 
-type Transaction struct {
-	Nonce uint64
-}
-
-func (t *Transaction) Hash() []byte {
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, t.Nonce)
-	return buf
-}
-
-func MakeTransactions(n int) []*Transaction {
-	txx := make([]*Transaction, n)
-	for i := 0; i < n; i++ {
-		txx[i] = &Transaction{rand.Uint64()}
+func MakeTransactions(count int) []*types.Transaction {
+	txs := make([]*types.Transaction, count)
+	time.Sleep(10 * time.Millisecond)
+	s, err := types.GenerateSigner()
+	if err != nil {
+		panic(err)
 	}
-	return txx
+	for i := 0; i < count; i++ {
+		tx, err := types.GenerateTransactionWithSigner(uint64(i), types.NewAddressByStr(to), big.NewInt(1), nil, s)
+		if err != nil {
+			panic(err)
+		}
+		txs[i] = tx
+	}
+	return txs
 }

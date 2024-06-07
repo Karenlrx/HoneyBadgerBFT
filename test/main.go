@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 
-	"../hbbft"
+	"github.com/liu-jianhao/HoneyBadgerBFT/hbbft"
 )
 
 type message struct {
@@ -35,13 +35,13 @@ func main() {
 		go node.addTransactionLoop()
 		go func(node *Server) {
 			if err := node.hb.Start(); err != nil {
-				panic("hb.Start")
+				panic(fmt.Errorf("hb.Start: %w", err))
 			}
 			for _, msg := range node.hb.GetMessage() {
 				messages <- message{node.id, msg}
 			}
 		}(node)
-		go node.commitLoop()
+		//go node.commitLoop()
 	}
 
 	for {
@@ -49,7 +49,7 @@ func main() {
 		node := nodes[msg.payload.To]
 		hbMessage, _ := msg.payload.Payload.(hbbft.HBMessage)
 		if err := node.hb.HandleMessage(msg.from, hbMessage.Epoch, hbMessage.Payload.(*hbbft.ACSMessage)); err != nil {
-			panic("hb.HandleMessage")
+			panic(fmt.Errorf("hb.HandleMessage: %w", err))
 		}
 		for _, msg := range node.hb.GetMessage() {
 			messages <- message{node.id, msg}

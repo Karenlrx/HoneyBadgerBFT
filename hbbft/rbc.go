@@ -7,8 +7,9 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/NebulousLabs/merkletree"
 	"github.com/klauspost/reedsolomon"
+	"github.com/sirupsen/logrus"
+	"gitlab.com/NebulousLabs/merkletree"
 )
 
 type RBC struct {
@@ -42,6 +43,8 @@ type RBC struct {
 	closeCh   chan struct{}
 	inputCh   chan rbcInput
 	messageCh chan rbcMessage
+
+	logger logrus.FieldLogger
 }
 
 func NewRBC(cfg Config, proposerID uint64) *RBC {
@@ -65,6 +68,7 @@ func NewRBC(cfg Config, proposerID uint64) *RBC {
 		closeCh:         make(chan struct{}),
 		inputCh:         make(chan rbcInput),
 		messageCh:       make(chan rbcMessage),
+		logger:          Logger(rbc),
 	}
 
 	go rbc.run()
@@ -91,9 +95,10 @@ type rbcInput struct {
 type ProofRequest struct {
 	RootHash []byte
 	// Proof[0]
-	Proof  [][]byte
-	Index  int
-	Leaves int
+	Proof      [][]byte
+	Index      int
+	Leaves     int
+	SourceSize int
 }
 
 type EchoRequest struct {
@@ -200,10 +205,11 @@ func (r *RBC) inputValue(data []byte) ([]*BroadcastMessage, error) {
 		root, proof, proofIndex, n := tree.Prove()
 		msgs[i] = &BroadcastMessage{
 			Payload: &ProofRequest{
-				RootHash: root,
-				Proof:    proof,
-				Index:    int(proofIndex),
-				Leaves:   int(n),
+				RootHash:   root,
+				Proof:      proof,
+				Index:      int(proofIndex),
+				Leaves:     int(n),
+				SourceSize: len(data),
 			},
 		}
 	}
@@ -297,6 +303,7 @@ func (r *RBC) decodeValue(hash []byte) error {
 	for _, echo := range r.recvEchos {
 		proof = append(proof, echo.ProofRequest)
 	}
+	// 按照proof index重排
 	sort.Sort(proof)
 
 	// 重建shards
@@ -308,11 +315,14 @@ func (r *RBC) decodeValue(hash []byte) error {
 		return nil
 	}
 
-	var result []byte
-	for _, data := range shards[:r.numDataShards] {
-		result = append(result, data...)
+	out := new(bytes.Buffer)
+	dataSize := proof[0].SourceSize
+	err := r.encoder.Join(out, shards, dataSize)
+	if err != nil {
+		return err
 	}
-	r.output = result
+	// 重建分片后，result即为一开始的提案信息
+	r.output = out.Bytes()
 
 	return nil
 }
